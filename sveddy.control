@@ -1,0 +1,4 @@
+comment = 'SVD-based collaborative filtering plugin for PostgreSQL'
+default_version = '0.1.0'
+module_pathname = '$libdir/sveddy'
+

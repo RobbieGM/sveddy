@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+rm -f compile_flags.txt
+echo "-I" >> compile_flags.txt
+echo "$(nix-store -r $(which postgres) 2>/dev/null)/include/server" >> compile_flags.txt

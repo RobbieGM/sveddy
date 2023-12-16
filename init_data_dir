@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+initdb -D data
+cp postgresql.conf data/

@@ -1,0 +1,4 @@
+CREATE OR REPLACE FUNCTION
+add_integers(int,int) RETURNS int AS 'MODULE_PATHNAME','add_integers'
+LANGUAGE C STRICT;
+

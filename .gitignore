@@ -1,0 +1,10 @@
+# postgres server data
+data/
+# compiled files
+*.so
+*.o
+# regression test output
+regression.*
+results/
+# other generated files
+compile_flags.txt
