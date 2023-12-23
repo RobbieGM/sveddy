@@ -1,7 +1,0 @@
-CREATE EXTENSION sveddy;
-SELECT add_integers(5, 3);
- add_integers 
---------------
-            8
-(1 row)
-

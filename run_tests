@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-# Make sure to run have an instance of `postgres -D data` running before running this
-PGHOST=localhost PGPORT=5433 make installcheck
