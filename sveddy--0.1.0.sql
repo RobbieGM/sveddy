@@ -79,12 +79,12 @@ BEGIN
 
 	-- Fill U and V
 	EXECUTE format('INSERT INTO %I (id, weights)
-				SELECT %I, get_initial_weights(%s)
+				SELECT %I, get_initial_weights_uv(%s)
 				FROM %I
 				GROUP BY %I;', u_table_name, user_column, k, source_table, user_column);
 
 	EXECUTE format('INSERT INTO %I (id, weights)
-				SELECT %I, get_initial_weights(%s)
+				SELECT %I, get_initial_weights_uv(%s)
 				FROM %I
 				GROUP BY %I;', v_table_name, item_column, k, source_table, item_column);
 
@@ -141,7 +141,7 @@ $$;
 
 
 CREATE OR REPLACE FUNCTION
-get_initial_weights(integer) RETURNS real[]
+get_initial_weights_uv(integer) RETURNS real[]
 AS 'MODULE_PATHNAME' LANGUAGE C STRICT PARALLEL SAFE;
 -- Procedures for updating U and V after inserting into source_table. If the
 -- inserted record refers to a new user or item, these functions add the

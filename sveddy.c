@@ -14,8 +14,8 @@ static float4 random_uniform() {
 	return (rand() / (float4) RAND_MAX);
 }
 
-PG_FUNCTION_INFO_V1(get_initial_weights);
-Datum get_initial_weights(PG_FUNCTION_ARGS) {
+PG_FUNCTION_INFO_V1(get_initial_weights_uv);
+Datum get_initial_weights_uv(PG_FUNCTION_ARGS) {
 	int32 k = PG_GETARG_INT32(0);
 	// Return an array of length k filled with zeros.
 	ArrayType *result;
@@ -79,7 +79,7 @@ static Datum update_u_or_v(PG_FUNCTION_ARGS, enum uv_table_which which) {
 		if (is_null) {
 			elog(ERROR, "update_%c: could not retrieve id", which_char);
 		}
-		sprintf(sql, "INSERT INTO %s (id, weights) VALUES (%d, get_initial_weights(%d)) ON CONFLICT (id) DO NOTHING", model_table, id, k);
+		sprintf(sql, "INSERT INTO %s (id, weights) VALUES (%d, get_initial_weights_uv(%d)) ON CONFLICT (id) DO NOTHING", model_table, id, k);
 		ret = SPI_exec(sql, 0);
 		if (ret != SPI_OK_INSERT) {
 			elog(ERROR, "Failed to insert new row into %s", model_table);
