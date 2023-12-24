@@ -124,18 +124,17 @@ DECLARE
 	item_column name;
 BEGIN
 	EXECUTE format('SELECT user_column, item_column
-		INTO user_column, item_column
 		FROM sveddy_models_uv
-		WHERE source_table = %L', source_table);
-	EXECUTE format('DELETE r FROM %1$I r
-		LEFT JOIN %2$I source_row
-		ON source_row.%3$I = %1$I.id
-		WHERE source_row.%3$I IS NULL
+		WHERE source_table = %L', source_table) INTO user_column, item_column;
+	EXECUTE format('DELETE FROM %1$I u
+		WHERE NOT EXISTS (
+			SELECT FROM %2I r WHERE r.%3$I = u.id
+		)
 		', u_table_name, source_table, user_column);
-	EXECUTE format('DELETE r FROM %1$I r
-		LEFT JOIN %2$I source_row
-		ON source_row.%3$I = %1$I.id
-		WHERE source_row.%3$I IS NULL
+	EXECUTE format('DELETE FROM %1$I v
+		WHERE NOT EXISTS (
+			SELECT FROM %2I r WHERE r.%3$I = v.id
+		)
 		', v_table_name, source_table, item_column);
 END;
 $$;
