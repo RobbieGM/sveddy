@@ -227,7 +227,6 @@ Datum train_uv(PG_FUNCTION_ARGS) {
 	bool quiet = PG_GETARG_BOOL(2);
 	char *user_column, *item_column, *rating_column, *u_table, *v_table;
 	int32 k;
-	float4 learning_rate;
 	char sql[800];
 	int ret;
 	uint32 max_rows_uv, rows_u, rows_v;
@@ -242,7 +241,7 @@ Datum train_uv(PG_FUNCTION_ARGS) {
 	bool is_null;
 
 	SPI_connect();
-	sprintf(sql, "SELECT user_column, item_column, rating_column, u_table, v_table, k, learning_rate FROM sveddy_models_uv WHERE source_table = '%s'", source_table);
+	sprintf(sql, "SELECT user_column, item_column, rating_column, u_table, v_table, k FROM sveddy_models_uv WHERE source_table = '%s'", source_table);
 	ret = SPI_exec(sql, 1);
 	if (ret != SPI_OK_SELECT) {
 		elog(ERROR, "train_uv: Could not find source_table = '%s' in sveddy_models_uv", source_table);
@@ -253,7 +252,6 @@ Datum train_uv(PG_FUNCTION_ARGS) {
 	u_table = SPI_getvalue(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 4);
 	v_table = SPI_getvalue(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 5);
 	k = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 6, &is_null));
-	learning_rate = 1; // DatumGetFloat4(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 6, &is_null)); // TODO
 	// prepare query plans for statements to update rows in u, v
 	sprintf(sql, "UPDATE %s SET weights = $1 WHERE id = $2", u_table);
 	update_u_plan = SPI_prepare(sql, 2, update_uv_plan_argument_oids);

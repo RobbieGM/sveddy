@@ -15,9 +15,9 @@ INSERT INTO ratings (uid, iid, rating) VALUES
 (3, 3, 4);
 CALL initialize_model_uv('ratings', 'uid', 'iid', 'rating', 2);
 SELECT * FROM sveddy_models_uv;
- source_table | user_column | item_column | rating_column |        u_table         |        v_table         | k | learning_rate 
---------------+-------------+-------------+---------------+------------------------+------------------------+---+---------------
- ratings      | uid         | iid         | rating        | ratings_sveddy_model_u | ratings_sveddy_model_v | 2 |         0.001
+ source_table | user_column | item_column | rating_column |        u_table         |        v_table         | k 
+--------------+-------------+-------------+---------------+------------------------+------------------------+---
+ ratings      | uid         | iid         | rating        | ratings_sveddy_model_u | ratings_sveddy_model_v | 2
 (1 row)
 
 SELECT id, cardinality(weights) FROM ratings_sveddy_model_u;

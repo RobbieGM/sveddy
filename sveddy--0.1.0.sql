@@ -22,9 +22,7 @@ CREATE TABLE IF NOT EXISTS sveddy_models_uv (
 	v_table name,
 	-- The hyperparameter k, which is the rank of the low-rank matrix
 	-- approximation R ~= UV^T.
-	k integer,
-	-- The learning rate hyperparameter.
-	learning_rate real
+	k integer
 );
 -- Initializes a UV decomposition model for predicting ratings.
 -- The source table is expected to contain columns for the user id, item id,
@@ -57,8 +55,7 @@ CREATE OR REPLACE PROCEDURE initialize_model_uv(
 	user_column name,
 	item_column name,
 	rating_column name,
-	k integer,
-	learning_rate real default 0.001
+	k integer
 )
 LANGUAGE plpgsql
 AS $$
@@ -105,10 +102,9 @@ BEGIN
 		rating_column,
 		u_table,
 		v_table,
-		k,
-		learning_rate
-	) VALUES (%L, %L, %L, %L, %L, %L, %L, %L)
-	', source_table, user_column, item_column, rating_column, u_table_name, v_table_name, k, learning_rate, source_table);
+		k
+	) VALUES (%L, %L, %L, %L, %L, %L, %L)
+	', source_table, user_column, item_column, rating_column, u_table_name, v_table_name, k, source_table);
 END;
 $$;
 
