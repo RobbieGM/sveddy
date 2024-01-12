@@ -143,6 +143,11 @@ $$;
 CREATE OR REPLACE FUNCTION
 get_initial_weights_uv(integer) RETURNS real[]
 AS 'MODULE_PATHNAME' LANGUAGE C STRICT PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION
+predict_uv(real[], real[]) RETURNS real
+AS 'MODULE_PATHNAME' LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+
 -- Procedures for updating U and V after inserting into source_table. If the
 -- inserted record refers to a new user or item, these functions add the
 -- necessary rows to U or V. They also update the model.
@@ -154,3 +159,6 @@ CREATE OR REPLACE FUNCTION
 update_v() RETURNS TRIGGER 
 AS 'MODULE_PATHNAME' LANGUAGE C STRICT;
 
+CREATE OR REPLACE PROCEDURE
+train_uv(source_table name, regularization_factor real DEFAULT 0.05, quiet boolean DEFAULT false)
+AS 'MODULE_PATHNAME' LANGUAGE C;
