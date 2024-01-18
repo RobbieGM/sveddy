@@ -1,7 +1,7 @@
 DROP SCHEMA public CASCADE;
 NOTICE:  drop cascades to 4 other objects
-DETAIL:  drop cascades to extension sveddy
-drop cascades to table ratings
+DETAIL:  drop cascades to table ratings
+drop cascades to extension sveddy
 drop cascades to table ratings_sveddy_model_u
 drop cascades to table ratings_sveddy_model_v
 CREATE SCHEMA public;

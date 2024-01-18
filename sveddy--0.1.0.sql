@@ -1,10 +1,3 @@
-DO $$
-BEGIN
-	IF NOT EXISTS (SELECT 1 FROM pg_type where typname = 'sveddy_algorithm') THEN
-		CREATE TYPE sveddy_algorithm AS ENUM ('uv');
-	END IF;
-END
-$$;
 -- A table holding all sveddy UV models.
 CREATE TABLE IF NOT EXISTS sveddy_models_uv (
 	-- The table to predict ratings from. It is expected to contain a row for 
@@ -31,7 +24,9 @@ CREATE TABLE IF NOT EXISTS sveddy_models_uv (
 -- The source table is expected to contain columns for the user id, item id,
 -- and rating. The user id and item id are both expected to be of type integer.
 -- The rating can be any numeric type. It is HIGHLY RECOMMENDED to create
--- indices on the source table for both the user_column and item_column.
+-- indices on the source table for both the user_column and item_column, as
+-- the trigger that fires when a rating is added or updated will run queries
+-- such as SELECT ... FROM source_table WHERE userid = ?.
 --
 -- This function creates two new tables: a U table and a V table. The U table
 -- will have the name source_table + "_sveddy_model_u" and the V table will have
@@ -45,12 +40,8 @@ CREATE TABLE IF NOT EXISTS sveddy_models_uv (
 -- After the U and V tables are created, they are populated with rows from the
 -- source table. Each unique user id (selected from user_column) gets a row in 
 -- U, and each unique item id (selected from item_column) gets a row in V.
--- The weights are initialized to k-length array of zeros. The sum and count
--- of each row in the U and V tables are initialized properly from the source
--- table.
+-- The weights are initialized to k-length array of random numbers.
 --
--- This procedure also creates triggers on the source table to keep the sum
--- and count columns of each row in the U table and V table up to date.
 -- The procedure does not train the model.
 
 CREATE OR REPLACE PROCEDURE initialize_model_uv(
