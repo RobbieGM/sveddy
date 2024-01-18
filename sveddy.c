@@ -213,6 +213,7 @@ Datum update_model_uv(PG_FUNCTION_ARGS) {
 	for (enum uv_table_which which = U; which <= V; which++) {
 		char *this_table, *that_table;
 		int32 this_id;
+		char *this_id_column, *that_id_column;
 		SPIParseOpenOptions parse_open_options = {0};
 		Portal cursor;
 		float *A, *b;
@@ -221,10 +222,14 @@ Datum update_model_uv(PG_FUNCTION_ARGS) {
 			this_table = u_table;
 			that_table = v_table;
 			this_id = user_id;
+			this_id_column = user_column;
+			that_id_column = item_column;
 		} else {
 			this_table = v_table;
 			that_table = u_table;
 			this_id = item_id;
+			this_id_column = item_column;
+			that_id_column = user_column;
 		}
 		// Initialize A, b
 		A = palloc(sizeof(float4) * k * k);
@@ -240,12 +245,10 @@ Datum update_model_uv(PG_FUNCTION_ARGS) {
 		// Calculate new weights
 		sprintf(sql, "SELECT \"%s\"::real, \"%s\".weights FROM \"%s\""
 		  " JOIN \"%s\" ON \"%s\".id = \"%s\".\"%s\""
-		  " JOIN \"%s\" ON \"%s\".id = \"%s\".\"%s\""
-		  " WHERE \"%s\".id = %d",
+		  " WHERE \"%s\".\"%s\" = %d",
 		  rating_column, that_table, source_table,
-		  u_table, u_table, source_table, user_column,
-		  v_table, v_table, source_table, item_column,
-		  this_table, this_id
+		  that_table, that_table, source_table, that_id_column,
+		  source_table, this_id_column, this_id
 		);
 		cursor = SPI_cursor_parse_open(NULL, sql, &parse_open_options);
 		while (true) {
