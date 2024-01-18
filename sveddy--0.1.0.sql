@@ -22,7 +22,10 @@ CREATE TABLE IF NOT EXISTS sveddy_models_uv (
 	v_table name,
 	-- The hyperparameter k, which is the rank of the low-rank matrix
 	-- approximation R ~= UV^T.
-	k integer
+	k integer,
+	-- The model's regularization factor. Increasing this may help prevent
+	-- overfitting.
+	regularization_factor real
 );
 -- Initializes a UV decomposition model for predicting ratings.
 -- The source table is expected to contain columns for the user id, item id,
@@ -55,7 +58,8 @@ CREATE OR REPLACE PROCEDURE initialize_model_uv(
 	user_column name,
 	item_column name,
 	rating_column name,
-	k integer
+	k integer,
+	regularization_factor real DEFAULT 0.05
 )
 LANGUAGE plpgsql
 AS $$
@@ -85,14 +89,10 @@ BEGIN
 				FROM %I
 				GROUP BY %I;', v_table_name, item_column, k, source_table, item_column);
 
-	-- Triggers for U and V. Deletion trigger not needed because we aren't going to update weights on delete
-	EXECUTE format('CREATE OR REPLACE TRIGGER update_u
+	-- Triggers to update the model. Deletion trigger not needed because we aren't going to update weights on delete
+	EXECUTE format('CREATE OR REPLACE TRIGGER update_model_uv
 		AFTER INSERT OR UPDATE ON %I 
-		FOR EACH ROW EXECUTE FUNCTION update_u();', source_table, source_table);
-
-	EXECUTE format('CREATE OR REPLACE TRIGGER update_v
-		AFTER INSERT OR UPDATE ON %I 
-		FOR EACH ROW EXECUTE FUNCTION update_v();', source_table, source_table);
+		FOR EACH ROW EXECUTE FUNCTION update_model_uv();', source_table, source_table);
 
 	-- Insert the new model into the UV models table
 	EXECUTE format('INSERT INTO sveddy_models_uv (
@@ -102,9 +102,10 @@ BEGIN
 		rating_column,
 		u_table,
 		v_table,
-		k
-	) VALUES (%L, %L, %L, %L, %L, %L, %L)
-	', source_table, user_column, item_column, rating_column, u_table_name, v_table_name, k, source_table);
+		k,
+		regularization_factor
+	) VALUES (%L, %L, %L, %L, %L, %L, %L, %L)
+	', source_table, user_column, item_column, rating_column, u_table_name, v_table_name, k, regularization_factor);
 END;
 $$;
 
@@ -144,17 +145,13 @@ CREATE OR REPLACE FUNCTION
 predict_uv(real[], real[]) RETURNS real
 AS 'MODULE_PATHNAME' LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
 
--- Procedures for updating U and V after inserting into source_table. If the
+-- Procedure for updating U and V after inserting into source_table. If the
 -- inserted record refers to a new user or item, these functions add the
 -- necessary rows to U or V. They also update the model.
 CREATE OR REPLACE FUNCTION
-update_u() RETURNS TRIGGER 
-AS 'MODULE_PATHNAME' LANGUAGE C STRICT;
-
-CREATE OR REPLACE FUNCTION
-update_v() RETURNS TRIGGER 
+update_model_uv() RETURNS TRIGGER 
 AS 'MODULE_PATHNAME' LANGUAGE C STRICT;
 
 CREATE OR REPLACE PROCEDURE
-train_uv(source_table name, regularization_factor real DEFAULT 0.05, quiet boolean DEFAULT false)
+train_uv(source_table name, patience smallint DEFAULT 4, max_iterations smallint DEFAULT 8, quiet boolean DEFAULT false)
 AS 'MODULE_PATHNAME' LANGUAGE C;

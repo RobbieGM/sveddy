@@ -45,20 +45,29 @@ INSERT INTO ratings (uid, iid, rating) VALUES
 (6, 2, -1),
 (6, 3, -1),
 (6, 4, 1),
-(6, 5, 0), -- outlier
-(6, 6, 1),
-(7, 1, -1),
-(7, 2, -1),
-(7, 3, -1),
-(7, 4, 1),
-(7, 5, 1),
-(7, 6, 1);
+(6, 5, 1),
+(6, 6, 1);
+-- (7, 1, -1),
+-- (7, 2, -1),
+-- (7, 3, -1),
+-- (7, 4, 1),
+-- (7, 5, 1),
+-- (7, 6, 1);
 
 CALL initialize_model_uv('ratings', 'uid', 'iid', 'rating', 2);
 CALL train_uv('ratings', quiet => true);
 
-SELECT rating, round(predict_uv(ratings_sveddy_model_u.weights, ratings_sveddy_model_v.weights)) + 1 - 1 as predicted -- add and subtract one to avoid flaky negative zeros
-FROM ratings
-JOIN ratings_sveddy_model_u ON ratings_sveddy_model_u.id = ratings.uid
-JOIN ratings_sveddy_model_v ON ratings_sveddy_model_v.id = ratings.iid;
+INSERT INTO ratings (uid, iid, rating) VALUES
+(7, 1, -1),
+-- (7, 2, -1),
+-- (7, 3, -1),
+(7, 4, 1);
+-- (7, 5, 1),
+-- (7, 6, 1);
 
+SELECT round(predict_uv(
+    (SELECT weights FROM ratings_sveddy_model_u WHERE id = 7),
+    Items.weights
+   ))
+FROM 
+    (SELECT weights FROM ratings_sveddy_model_v WHERE id in (2, 3, 5, 6) ORDER BY id ASC) AS Items;

@@ -1,9 +1,9 @@
 MODULES = sveddy
 EXTENSION = sveddy
 DATA = sveddy--0.1.0.sql
-REGRESS = uv_init uv_insert_trigger uv_weight_initialization uv_garbage_collection uv_predict uv_train
+REGRESS = uv_init uv_insert_trigger uv_weight_initialization uv_garbage_collection uv_predict uv_train uv_continuous_learning
 REGRESS_OPTS = --port=5433 --host=localhost
-PG_CFLAGS =
+PG_CFLAGS = -fopenmp
 ifneq ($(SSE),no)
    PG_CFLAGS += -msse3
 endif

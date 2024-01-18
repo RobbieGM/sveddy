@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 
+shopt -s globstar
+
 rm -f compile_flags.txt
-echo "-I" >> compile_flags.txt
+# echo "-I" >> compile_flags.txt
 # IS_NIX := $(shell which nix > /dev/null 2>&1 && echo yes || echo no)
 if which nix > /dev/null 2>&1; then
-	echo "$(nix-store -r $(which postgres) 2>/dev/null)/include/server" >> compile_flags.txt
+	echo "-I$(nix-store -r $(which postgres) 2>/dev/null)/include/server" >> compile_flags.txt
+	# Nix systems have a hard time finding omp.h
+	GCC_UNWRAPPED_PATH=$(nix-build '<nixpkgs>' -A gcc-unwrapped --no-out-link)
+	for path in ${GCC_UNWRAPPED_PATH}/lib/gcc/*-unknown-linux-gnu/*/include; do
+		echo "-I${path}" >> compile_flags.txt
+	done
 else
 	PG_CONFIG = pg_config
 	echo "$(pg_config --includedir-server)" >> compile_flags.txt
