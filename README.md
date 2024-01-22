@@ -15,7 +15,7 @@ INSERT INTO ratings (user_id, movie_id, rating) VALUES
 -- User 1 likes movies 1 and 2 but not 3 and 4
 (1, 1, 5),
 (1, 2, 5),
-(1, 3, 3),
+(1, 3, 1),
 (1, 4, 2),
 -- User 2 likes movies 3 and 4 but not 1 and 2
 (2, 1, 1),

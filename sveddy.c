@@ -13,7 +13,7 @@
 #endif
 // Ignore any errors coming from the <omp.h> file if using clangd language server with gcc's omp.h
 
-#define ROWS_TO_FETCH 128
+#define ROWS_TO_FETCH 2048
 
 
 PG_MODULE_MAGIC;
@@ -45,7 +45,7 @@ Datum get_initial_weights_uv(PG_FUNCTION_ARGS) {
 /*
  * Takes dot product of a and b, each of which are k-length.
  */
-static float4 dot(float4 *a, float4 *b, int k) {
+static float4 dot(const float4 *a, const float4 *b, int k) {
 #if !defined(__i386__) && !defined(__x86_64__)
 	float4 sum = 0;
 	for (int i = 0; i < k; i++) {
@@ -324,12 +324,11 @@ Datum train_uv(PG_FUNCTION_ARGS) {
 	int32 k;
 	char sql[800];
 	int ret;
-	uint32 max_rows_uv, rows_u, rows_v;
 	uint32 max_id_uv, max_id_u, max_id_v;
 	float4 *linear_equations;
 	size_t linear_equations_size;
-	uint32 *id_to_index_map, *index_to_id_map;
-	uint32 index_to_id_map_size;
+	float4 *u, *v;
+	Portal cursor;
 	int current_patience = patience;
 	double best_rmse = DBL_MAX;
 	SPIParseOpenOptions parse_open_options = {0};
@@ -338,6 +337,7 @@ Datum train_uv(PG_FUNCTION_ARGS) {
 	bool is_null;
 
 	SPI_connect();
+	// Load model parameters
 	sprintf(sql, "SELECT user_column, item_column, rating_column, u_table, v_table, k, regularization_factor FROM sveddy_models_uv WHERE source_table = '%s'", source_table);
 	ret = SPI_exec(sql, 1);
 	if (ret != SPI_OK_SELECT) {
@@ -350,48 +350,68 @@ Datum train_uv(PG_FUNCTION_ARGS) {
 	v_table = SPI_getvalue(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 5);
 	k = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 6, &is_null));
 	regularization_factor = DatumGetFloat4(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 7, &is_null));
-	// prepare query plans for statements to update rows in u, v
+	// Prepare query plans for statements to update rows in u, v
 	sprintf(sql, "UPDATE %s SET weights = $1 WHERE id = $2", u_table);
 	update_u_plan = SPI_prepare(sql, 2, update_uv_plan_argument_oids);
 	sprintf(sql, "UPDATE %s SET weights = $1 WHERE id = $2", v_table);
 	update_v_plan = SPI_prepare(sql, 2, update_uv_plan_argument_oids);
 
-	// find max(# users, # items) to figure out how much memory to allocate
-	// also find max user id and max item id for the id-to-index map
-	// this assumes that all of the linear equations will fit into memory at once,
+	// Find max(user id), max(item id) to figure out how much memory to allocate
+	// This assumes that all of the linear equations will fit into memory at once,
 	// which is true for up to 4.6 million users, k = 20 with 8GB of RAM.
-	sprintf(sql, "SELECT count(id), max(id) FROM \"%s\"", u_table);
+	// (not counting the memory used by u and v)
+	sprintf(sql, "SELECT max(id) FROM \"%s\"", u_table);
 	ret = SPI_exec(sql, 1);
 	if (ret != SPI_OK_SELECT) {
 		elog(ERROR, "train_uv: Failed query: %s", sql);
 	}
-	rows_u = DatumGetUInt32(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &is_null));
-	max_id_u = DatumGetUInt32(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 2, &is_null));
-
-	sprintf(sql, "SELECT count(id), max(id) FROM \"%s\"", v_table);
+	max_id_u = DatumGetUInt32(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &is_null));
+	sprintf(sql, "SELECT max(id) FROM \"%s\"", v_table);
 	ret = SPI_exec(sql, 1);
 	if (ret != SPI_OK_SELECT) {
 		elog(ERROR, "train_uv: Failed query: %s", sql);
 	}
-	rows_v = DatumGetUInt32(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &is_null));
-	max_id_v = DatumGetUInt32(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 2, &is_null));
-
-	max_rows_uv = rows_u > rows_v ? rows_u : rows_v;
+	max_id_v = DatumGetUInt32(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &is_null));
 	max_id_uv = max_id_u > max_id_v ? max_id_u : max_id_v;
 
-	// allocate enough memory for max_rows_uv linear equations
+	// Allocate enough memory for max_rows_uv linear equations
 	// each linear equation takes sizeof(float4) * k * k (for A) + sizeof(float4) * k (for B) bytes
 	// the related As and bs will be stored contiguously, with the matrix A before b
 	// |-----------------|---------------|-----------------|-------------- ...
 	//   A0 (k*k*float4)   b0 (k*float4)   A1 (k*k*float4)   b1 (k*float4)  ...
-	// The index in A is arbitrary and determined by which rows in the source
-	// table are seen first. To figure out the index in A from a user id or
-	// item id, the id_to_index_map and index_to_id_map arrays are created.
-	linear_equations_size = sizeof(float4) * max_rows_uv * k * (k+1);
+	// The index in linear_equations is equivalent to either the user id (if updating U) or the item id (if updating V)
+	linear_equations_size = sizeof(float4) * (max_id_uv + 1) * k * (k+1);
 	linear_equations = palloc(linear_equations_size);
-	// Allocate memory for index_to_id_map and id_to_index_map
-	id_to_index_map = palloc(sizeof(uint32) * (max_id_uv + 1));
-	index_to_id_map = palloc(sizeof(uint32) * max_rows_uv);
+
+	// Allocate memory for U and V
+	u = palloc(sizeof(float4) * (max_id_u + 1) * k);
+	v = palloc(sizeof(float4) * (max_id_v + 1) * k);
+	// Fill with 0xff (NaN) to indicate that the entry is not present, as some rows may have been deleted
+	memset(u, 0xff, sizeof(float4) * (max_id_u + 1) * k);
+	memset(v, 0xff, sizeof(float4) * (max_id_v + 1) * k);
+	
+	// Fill u and v
+	for (enum uv_table_which which = U; which <= V; which++) {
+		float4 *this_memblock = which == U ? u : v;
+		sprintf(sql, "SELECT id, weights FROM \"%s\"", which == U ? u_table : v_table);
+		cursor = SPI_cursor_parse_open(NULL, sql, &parse_open_options);
+		while (true) {
+			// Get row(s) from the above query
+			int32 id;
+			ArrayType *weights_arr;
+			float4 *weights;
+			SPI_cursor_fetch(cursor, true, ROWS_TO_FETCH);
+			// TODO this might be parallelizable to some degree
+			for (int i = 0; i < SPI_processed; i++) {
+				id = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1, &is_null));
+				weights_arr = DatumGetArrayTypeP(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 2, &is_null));
+				weights = (float4 *) ARR_DATA_PTR(weights_arr);
+				memcpy(this_memblock + id * k, weights, sizeof(float4) * k);
+			}
+			if (SPI_processed == 0) break;
+			SPI_freetuptable(SPI_tuptable);
+		}
+	}
 
 	// Do one pass through the training data for each step
 	for (int training_iteration = 0; training_iteration < max_iterations && current_patience > 0; training_iteration++) {
@@ -399,78 +419,51 @@ Datum train_uv(PG_FUNCTION_ARGS) {
 		double total_square_error = 0;
 		double rmse;
 		int total_processed = 0;
-		char *this_table, *that_table;
-		Portal cursor;
-		SPIPlanPtr update_plan = which == U ? update_u_plan : update_v_plan;
-		if (which == U) {
-			this_table = u_table;
-			that_table = v_table;
-		} else {
-			this_table = v_table;
-			that_table = u_table;
-		}
+		char *this_id_column = which == U ? user_column : item_column;
+		char *that_id_column = which == U ? item_column : user_column;
+		float4 *this_memblock = which == U ? u : v;
+		float4 *that_memblock = which == U ? v : u;
+		int this_max_id = which == U ? max_id_u : max_id_v;
+
 		// This query returns ratings from source_table along with the
-		// corresponding user and item weights, and user id (if u step)
-		// or item id (if v step)
-		sprintf(sql, "SELECT \"%s\".\"%s\"::real, \"%s\".weights, \"%s\".id::integer, \"%s\".weights FROM \"%s\""
-		  " JOIN \"%s\" ON \"%s\".id = \"%s\".\"%s\""
-		  " JOIN \"%s\" ON \"%s\".id = \"%s\".\"%s\"",
-		  source_table, rating_column, this_table, this_table, that_table, source_table,
-		  u_table, u_table, source_table, user_column,
-		  v_table, v_table, source_table, item_column
+		// corresponding user and item ids
+		sprintf(sql, "SELECT \"%s\".\"%s\"::real, \"%s\".\"%s\", \"%s\".\"%s\" FROM \"%s\"",
+		  source_table, rating_column, source_table, this_id_column, source_table, that_id_column, source_table
 		);
-		// Set all values in the maps to -1 (actually 2**32-1) as a sentinel value
-		// representing an empty map entry.
-		index_to_id_map_size = 0;
-		memset(id_to_index_map, -1, sizeof(uint32) * (max_id_uv + 1)); // representation of -1 is all 1 bits in the case of both char and int
-		memset(index_to_id_map, -1, sizeof(uint32) * max_rows_uv);
-		// Fill in linear_equations
-		// Start by setting all As and bs to 0, then adding lambda*I to all A matrices
-		memset(linear_equations, 0, linear_equations_size); // setting all bytes to zero also sets float4 numbers to zero
+
 		// A is at the beginning of each [A, b] block in linear_equations
+		// Clear A matrices, setting diagonal elements to regularization_factor
+		memset(linear_equations, 0, linear_equations_size);
 		#pragma omp parallel for
-		for (float4 *A = linear_equations; A < linear_equations + max_rows_uv * k * (k+1); A += k * (k+1)) {
+		for (float4 *A = linear_equations; A < linear_equations + (this_max_id + 1) * k * (k+1); A += k * (k+1)) {
 			// Fill in the diagonal elements with regularization_factor
 			// diagonal elements are k+1 indices apart
 			for (float4 *element = A; element < A + k * k; element += k + 1) {
 				*element = regularization_factor;
 			}
 		}
-		// Now add other components to A matrices and b vectors
+
+		// Now sum other components to A matrices and b vectors
 		cursor = SPI_cursor_parse_open(NULL, sql, &parse_open_options);
 		while (true) {
 			// Get row(s) from the above query
-			float4 rating;
-			float4 *this_weights;
-			int32 id;
-			float4 *that_weights;
-			ArrayType *this_weight_arr, *that_weight_arr;
-			float4 *A, *b;
-			size_t linear_equations_index;
-			SPI_cursor_fetch(cursor, true, ROWS_TO_FETCH); // fetching a higher number of rows at a time seems to increase perf
-			// TODO this might be parallelizable to some degree
+			// about 46 seconds for 100 million rows
+			SPI_cursor_fetch(cursor, true, ROWS_TO_FETCH);
+			if (SPI_processed == 0) break;
+			// also about 42 seconds for 100 million rows
+			// trying to parallelize by using (this_max_id + 1) locks makes it slower (4 minutes)
+			// using many threads for each chunk of loaded data, with each thread only handling this_id % num_threads == thread_num, is also worse (5 minutes)
 			for (int i = 0; i < SPI_processed; i++) {
 				float4 error;
-				rating = DatumGetFloat4(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1, &is_null));
-				this_weight_arr = DatumGetArrayTypeP(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 2, &is_null));
-				this_weights = (float4 *) ARR_DATA_PTR(this_weight_arr);
-				id = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 3, &is_null));
-				that_weight_arr = DatumGetArrayTypeP(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 4, &is_null));
-				
-				that_weights = (float4 *) ARR_DATA_PTR(that_weight_arr);
-				// First find the index in linear_equations of the row by id
-				if (id_to_index_map[id] != -1) {
-					linear_equations_index = id_to_index_map[id];
-				} else {
-					// Create a new entry in both maps
-					// The new index will one more than the current greatest
-					linear_equations_index = index_to_id_map_size;
-					index_to_id_map[index_to_id_map_size] = id;
-					index_to_id_map_size++;
-					id_to_index_map[id] = linear_equations_index;
-				}
+				float4 rating = DatumGetFloat4(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1, &is_null));
+				int32 this_id = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 2, &is_null));
+				int32 that_id = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 3, &is_null));
+				float4 *this_weights = this_memblock + this_id * k;
+				float4 *that_weights = that_memblock + that_id * k;
+				float4 *A, *b;
+
 				// Add that_weights * that_weights^T to the right A matrix (TODO: SIMD)
-				A = linear_equations + k * (k + 1) * linear_equations_index;
+				A = linear_equations + k * (k + 1) * this_id;
 				for (int row = 0; row < k; row++) {
 					for (int col = 0; col < k; col++) {
 						size_t offset = row * k + col;
@@ -489,7 +482,6 @@ Datum train_uv(PG_FUNCTION_ARGS) {
 				error = rating - dot(this_weights, that_weights, k);
 				total_square_error += error * error;
 			}
-			if (SPI_processed == 0) break;
 			total_processed += SPI_processed;
 			SPI_freetuptable(SPI_tuptable);
 		}
@@ -505,37 +497,35 @@ Datum train_uv(PG_FUNCTION_ARGS) {
 			elog(INFO, "train_uv: RMSE: %f (for %c step)", rmse, which == U ? 'u' : 'v');
 		}
 
-		// Solve all linear equations, placing solutions where the b vector was
-		// to avoid allocating more memory for solutions
+		// Solve all linear equations, placing solutions into u or v
 		#pragma omp parallel for
-		for (int i = 0; i < index_to_id_map_size; i++) {
-			float4 *weights = malloc(sizeof(float4) * k);
-			float4 *A = linear_equations + (k * k + k) * i;
+		for (int id = 0; id <= this_max_id; id++) {
+			float4 *weights = this_memblock + id * k;
+			float4 *A = linear_equations + (k * k + k) * id;
 			float4 *b = A + k * k;
-
-			if (weights == NULL) {
-				printf("train_uv: out of memory\n");
-				elog(ERROR, "train_uv: out of memory");
+			if (isnanf(weights[0])) {
+				// This row has been deleted
+				continue;
 			}
-			// compute weights
+			// Compute weights
 			cholesky(A, b, weights, k); // This function could be refactored to write directly into b, avoiding memcpy
-
-			// overwrite b with weights
-			memcpy(b, weights, sizeof(float4) * k);
-			free(weights);
 		}
+	}
 
-		// Write results
-		for (int i = 0; i < index_to_id_map_size; i++) {
-			int id = index_to_id_map[i];
-			float4 *weights = linear_equations + (k * k + k) * i + k * k;
+	// Write results
+	for (enum uv_table_which which = U; which <= V; which++) {
+		SPIPlanPtr update_plan = which == U ? update_u_plan : update_v_plan;
+		int this_max_id = which == U ? max_id_u : max_id_v;
+		float4 *this_memblock = which == U ? u : v;
+		for (int id = 0; id <= this_max_id; id++) {
+			float4 *weights = this_memblock + id * k;
 			Datum *weights_datums = palloc(sizeof(Datum) * k);
 			ArrayType *weights_array;
 			Datum datums[2];
-			if (id == -1) {
-				elog(ERROR, "train_uv: invalid index %d", i);
+			if (isnanf(weights[0])) {
+				// This row has been deleted
+				continue;
 			}
-
 			// Create array of datums from weights
 			for (int j = 0; j < k; j++) {
 				weights_datums[j] = Float4GetDatum(weights[j]);
@@ -552,8 +542,8 @@ Datum train_uv(PG_FUNCTION_ARGS) {
 		}
 	}
 	pfree(linear_equations);
-	pfree(id_to_index_map);
-	pfree(index_to_id_map);
+	pfree(u);
+	pfree(v);
 	SPI_finish();
 	PG_RETURN_NULL();
 }
