@@ -1,6 +1,6 @@
 # sveddy
 
-Sveddy is an in-database ML system for PostgreSQL implementing collaborative filtering algorithms. Sveddy supports continuous learning, meaning that when a user expresses their preferences, such as by rating an item, those preferences are immediately taken into account without requiring a full model re-train. Sveddy's UV algorithm performs nearly as well (within ~2% RMSE) as the winning entries on the Netflix Prize dataset; see the performance section for more details.
+Sveddy is an in-database ML system for PostgreSQL implementing collaborative filtering algorithms. Sveddy supports continuous learning, meaning that when a user expresses their preferences, such as by rating an item, those preferences are immediately taken into account without requiring a full model re-train. Sveddy's UV algorithm has similar performance on the Netflix Prize dataset as the winning entries; see the performance section for more details. 
 
 ## Example Usage
 
@@ -51,10 +51,12 @@ SELECT predict_uv(
     - Hardware: Dell Inspiron 7506, unknown 880 MB/s SSD, Intel i7-1165G7, 16GB RAM
     - Dataset: 100,480,507 ratings, 480,189 users, 17,700 movies
     - Parameters: k = 4, regularization\_constant = 0.05
-    - Validation RMSE: 0.87 (within ~2% of [top performing entries](https://en.wikipedia.org/wiki/Netflix_Prize) which scored RMSEs around 0.85)
+    - Validation RMSE: 0.87 ([top performing entries](https://en.wikipedia.org/wiki/Netflix_Prize) scored RMSEs around 0.85 on a similar test dataset)<sup>[1](#footnote-1)</sup>
     - Model initialization time (initialize\_model\_uv): 79s
     - Training time: 370s (8 iterations)
     - Continuous learning insertion overhead into ratings table: 450ms
+
+<sup><a name='footnote-1'>[1]</a> It's impossible to make a truly fair comparison here, as participants in the netflix challenge had RMSEs graded calculated from a separate private test set (the "qualifying set"), whereas Sveddy's validation RMSE was calculated by separating out 1/8 of the public training data as the validation set. The main difference between these is that the qualifying set was made up only of recent ratings, whereas Sveddy's validation set is sampled randomly from the public training set. As much as I would like to know Sveddy's RMSE on the qualifying set, the Netflix Prize closed over 10 years ago and is no longer accepting submissions. Entries using similar techniques scored around RMSEs around 0.89. More information about the Netflix Prize datasets [here](https://web.archive.org/web/20070927051207/http://www.netflixprize.com/assets/NetflixPrizeKDD_to_appear.pdf).</sup>
 
 ## Building & Installation
 
