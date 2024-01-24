@@ -1,6 +1,6 @@
 # sveddy
 
-Sveddy is an in-database ML system for PostgreSQL implementing collaborative filtering algorithms. Sveddy supports continuous learning, meaning that when a user expresses their preferences, such as by rating an item, those preferences are immediately taken into account without requiring a full model re-train. Sveddy's UV algorithm has similar performance on the Netflix Prize dataset as the winning entries; see the performance section for more details. 
+Sveddy is an in-database collaborative filtering system for PostgreSQL. Sveddy supports continuous learning, meaning that when a user expresses their preferences, such as by rating an item, those preferences are immediately taken into account without requiring a full model re-train. Sveddy's UV decomposition algorithm performs very well on the Netflix Prize dataset; see the performance section for more details. 
 
 ## Example Usage
 
@@ -56,7 +56,7 @@ SELECT predict_uv(
     - Training time: 370s (8 iterations)
     - Continuous learning insertion overhead into ratings table: 450ms
 
-<sup><a name='footnote-1'>[1]</a> It's impossible to make a truly fair comparison here, as participants in the netflix challenge had RMSEs graded calculated from a separate private test set (the "qualifying set"), whereas Sveddy's validation RMSE was calculated by separating out 1/8 of the public training data as the validation set. The main difference between these is that the qualifying set was made up only of recent ratings, whereas Sveddy's validation set is sampled randomly from the public training set. As much as I would like to know Sveddy's RMSE on the qualifying set, the Netflix Prize closed over 10 years ago and is no longer accepting submissions. Entries using similar techniques scored around RMSEs around 0.89. More information about the Netflix Prize datasets [here](https://web.archive.org/web/20070927051207/http://www.netflixprize.com/assets/NetflixPrizeKDD_to_appear.pdf).</sup>
+<sup><a name='footnote-1'>[1]</a> It's impossible to make a truly fair comparison here, as participants in the netflix challenge had RMSEs calculated from a separate private test set (the "qualifying set"), whereas Sveddy's validation RMSE was calculated by separating out 1/8 of the public training data as the validation set. The main difference between these is that the qualifying set was made up only of recent ratings, whereas Sveddy's validation set is sampled randomly from the public training set. As much as I would like to know Sveddy's RMSE on the qualifying set, the Netflix Prize closed over 10 years ago and is no longer accepting submissions. Entries using similar techniques scored around RMSEs around 0.89. More information about the Netflix Prize datasets [here](https://web.archive.org/web/20070927051207/http://www.netflixprize.com/assets/NetflixPrizeKDD_to_appear.pdf).</sup>
 
 ## Building & Installation
 
@@ -101,7 +101,7 @@ CALL garbage_collect_uv('ratings');
 
 ### `train_uv`
 `train_uv(source_table name, patience int DEFAULT 4, max_iterations int DEFAULT 8, training_validation_split float DEFAULT 0, quiet boolean DEFAULT false)`
-Trains the UV model for the source table whose name is given by the first parameter. This will periodically report training RMSE. The current implementation of `train_uv` requires slightly over `4*((k*k+k)*max(# users, # items))` bytes of memory to function. For example, the model's k hyperparameter is set to 5 and there is 10GB of free memory, Sveddy can train on a maximum of ~80 million users or items.
+Trains the UV model for the source table whose name is given by the first parameter. This will periodically report RMSE. The current implementation of `train_uv` requires slightly over `4*((k*k+k)*max(# users, # items) + k*(# users) + k*(# items))` bytes of memory to function. For example, if the model's k hyperparameter is set to 5 and there is 10GB of free memory, Sveddy can train on a maximum of about 60 million users and 60 million items. This function should be run on a semi regular basis, as the iterative learning done when an entry is inserted or updated in the source table will lead to a loss of model performance over time if a full re-train is not done.
 
 Parameters:
 - `source_table` Indicates the source table of the model which will be trained.
