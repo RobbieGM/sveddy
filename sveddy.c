@@ -312,13 +312,21 @@ Datum update_model_uv(PG_FUNCTION_ARGS) {
 	PG_RETURN_POINTER(return_tuple);
 }
 
+static bool is_validation_row(int32 user_id, int32 item_id, float validation_fraction) {
+	// LCG Park-Miller
+	unsigned int seed = user_id << 16 | item_id;
+	seed = (seed * 48271) % 0x7fffffff;
+	return (seed / (float) 0x7fffffff) < validation_fraction;
+}
+
 PG_FUNCTION_INFO_V1(train_uv);
 Datum train_uv(PG_FUNCTION_ARGS) {
 	// TODO handle case where not all of the data fits into memory
 	char *source_table = PG_GETARG_CSTRING(0);
-	int16 patience = PG_GETARG_INT16(1);
-	int16 max_iterations = PG_GETARG_INT16(2);
-	bool quiet = PG_GETARG_BOOL(3);
+	int32 patience = PG_GETARG_INT16(1);
+	int32 max_iterations = PG_GETARG_INT16(2);
+	float4 validation_fraction = PG_GETARG_FLOAT4(3);
+	bool quiet = PG_GETARG_BOOL(4);
 	char *user_column, *item_column, *rating_column, *u_table, *v_table;
 	float4 regularization_factor;
 	int32 k;
@@ -416,9 +424,11 @@ Datum train_uv(PG_FUNCTION_ARGS) {
 	// Do one pass through the training data for each step
 	for (int training_iteration = 0; training_iteration < max_iterations && current_patience > 0; training_iteration++) {
 		enum uv_table_which which = training_iteration % 2; // Start arbitrarily with the u step, alternating
-		double total_square_error = 0;
-		double rmse;
-		int total_processed = 0;
+		double total_square_error_train = 0;
+		double total_square_error_validation = 0;
+		double rmse_train, rmse_validation, rmse_used;
+		int total_processed_train = 0;
+		int total_processed_validation = 0;
 		char *this_id_column = which == U ? user_column : item_column;
 		char *that_id_column = which == U ? item_column : user_column;
 		float4 *this_memblock = which == U ? u : v;
@@ -454,47 +464,56 @@ Datum train_uv(PG_FUNCTION_ARGS) {
 			// trying to parallelize by using (this_max_id + 1) locks makes it slower (4 minutes)
 			// using many threads for each chunk of loaded data, with each thread only handling this_id % num_threads == thread_num, is also worse (5 minutes)
 			for (int i = 0; i < SPI_processed; i++) {
-				float4 error;
 				float4 rating = DatumGetFloat4(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1, &is_null));
 				int32 this_id = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 2, &is_null));
 				int32 that_id = DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 3, &is_null));
 				float4 *this_weights = this_memblock + this_id * k;
 				float4 *that_weights = that_memblock + that_id * k;
 				float4 *A, *b;
-
-				// Add that_weights * that_weights^T to the right A matrix (TODO: SIMD)
-				A = linear_equations + k * (k + 1) * this_id;
-				for (int row = 0; row < k; row++) {
-					for (int col = 0; col < k; col++) {
-						size_t offset = row * k + col;
-						A[offset] += that_weights[row] * that_weights[col];
+				float error = rating - dot(this_weights, that_weights, k);
+				if (is_validation_row(this_id, that_id, validation_fraction)) {
+					total_square_error_validation += error * error;
+					total_processed_validation++;
+				} else {
+					// Add that_weights * that_weights^T to the right A matrix (TODO: SIMD)
+					A = linear_equations + k * (k + 1) * this_id;
+					for (int row = 0; row < k; row++) {
+						for (int col = 0; col < k; col++) {
+							size_t offset = row * k + col;
+							A[offset] += that_weights[row] * that_weights[col];
+						}
 					}
-				}
 
-				// Add rating * that_weights to the right b vector
-				b = A + k * k;
-				for (int row = 0; row < k; row++) {
-					size_t offset = row;
-					b[offset] += rating * that_weights[row];
-				}
+					// Add rating * that_weights to the right b vector
+					b = A + k * k;
+					for (int row = 0; row < k; row++) {
+						size_t offset = row;
+						b[offset] += rating * that_weights[row];
+					}
 
-				// Recalculate total_square_error
-				error = rating - dot(this_weights, that_weights, k);
-				total_square_error += error * error;
+					total_square_error_train += error * error;
+					total_processed_train++;
+				}
 			}
-			total_processed += SPI_processed;
 			SPI_freetuptable(SPI_tuptable);
 		}
 
 		// Update patience and report RMSE
-		rmse = sqrt(total_square_error / total_processed);
-		if (rmse > best_rmse) {
+		rmse_train = sqrt(total_square_error_train / total_processed_train);
+		rmse_validation = sqrt(total_square_error_validation / total_processed_validation);
+		rmse_used = validation_fraction == 0 ? rmse_train : rmse_validation;
+		if (rmse_used > best_rmse) {
 			current_patience--;
 		} else {
 			current_patience = patience;
+			best_rmse = rmse_used;
 		}
 		if (!quiet) {
-			elog(INFO, "train_uv: RMSE: %f (for %c step)", rmse, which == U ? 'u' : 'v');
+			if (validation_fraction == 0) {
+				elog(INFO, "train_uv: RMSE (train) = %f (for %c step)", rmse_train, which == U ? 'u' : 'v');
+			} else {
+				elog(INFO, "train_uv: RMSE (train, validation) = %f, %f (for %c step)", rmse_train, rmse_validation, which == U ? 'u' : 'v');
+			}
 		}
 
 		// Solve all linear equations, placing solutions into u or v

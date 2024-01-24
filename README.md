@@ -88,13 +88,14 @@ CALL garbage_collect_uv('ratings');
 ```
 
 ### `train_uv`
-`train_uv(source_table name, patience smallint DEFAULT 4, max_iterations smallint DEFAULT 8, quiet boolean DEFAULT false)`
-Trains the UV model for the source table whose name is given by the first parameter. This will periodically report training RMSE. The current implementation of `train_uv` requires slightly over `4*((k*k+k)*max(# users, # items))` bytes of memory to function. If the model's k hyperparameter is set to 5 and there is 10GB of free memory, Sveddy can train on a maximum of ~80 million users or items.
+`train_uv(source_table name, patience int DEFAULT 4, max_iterations int DEFAULT 8, training_validation_split float DEFAULT 0, quiet boolean DEFAULT false)`
+Trains the UV model for the source table whose name is given by the first parameter. This will periodically report training RMSE. The current implementation of `train_uv` requires slightly over `4*((k*k+k)*max(# users, # items))` bytes of memory to function. For example, the model's k hyperparameter is set to 5 and there is 10GB of free memory, Sveddy can train on a maximum of ~80 million users or items.
 
 Parameters:
 - `source_table` Indicates the source table of the model which will be trained.
 - `patience` If more than this number of training iterations pass without RMSE reaching a new low, training will stop.
 - `max_iterations` The maximum number of training iterations.
+- `training_validation_split` The (approximate) fraction of entries in the source table which will be used for validation instead of training. If set to a nonzero value, early stopping behavior (set by the `patience` parameter) will respond to validation RMSE instead of training RMSE to avoid overfitting. Also, if `quiet` is false, logs will show both training and validation RMSE.
 - `quiet` If set to true, RMSE will not be logged.
 
 Example:
