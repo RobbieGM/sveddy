@@ -262,10 +262,6 @@ Datum update_model_uv(PG_FUNCTION_ARGS) {
 				rating = DatumGetFloat4(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1, &is_null));
 				that_weight_arr = DatumGetArrayTypeP(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 2, &is_null));
 				that_weights = (float4 *) ARR_DATA_PTR(that_weight_arr);
-				for (int j = 0; j < k; j++) {
-					if (isnan(that_weights[i]))
-						elog(WARNING, "i = %d, rating = %f", i, rating);
-				}
 				// Add that_weights * that_weights^T to A (TODO: SIMD)
 				for (int row = 0; row < k; row++) {
 					for (int col = 0; col < k; col++) {
@@ -315,7 +311,8 @@ Datum update_model_uv(PG_FUNCTION_ARGS) {
 static bool is_validation_row(int32 user_id, int32 item_id, float validation_fraction) {
 	// LCG Park-Miller
 	unsigned int seed = user_id << 16 | item_id;
-	seed = (seed * 48271) % 0x7fffffff;
+	for (int i = 0; i < 5; i++)
+		seed = (seed * 48271) % 0x7fffffff;
 	return (seed / (float) 0x7fffffff) < validation_fraction;
 }
 
@@ -323,8 +320,8 @@ PG_FUNCTION_INFO_V1(train_uv);
 Datum train_uv(PG_FUNCTION_ARGS) {
 	// TODO handle case where not all of the data fits into memory
 	char *source_table = PG_GETARG_CSTRING(0);
-	int32 patience = PG_GETARG_INT16(1);
-	int32 max_iterations = PG_GETARG_INT16(2);
+	int32 patience = PG_GETARG_INT32(1);
+	int32 max_iterations = PG_GETARG_INT32(2);
 	float4 validation_fraction = PG_GETARG_FLOAT4(3);
 	bool quiet = PG_GETARG_BOOL(4);
 	char *user_column, *item_column, *rating_column, *u_table, *v_table;

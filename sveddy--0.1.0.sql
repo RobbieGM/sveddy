@@ -144,5 +144,5 @@ update_model_uv() RETURNS TRIGGER
 AS 'MODULE_PATHNAME' LANGUAGE C STRICT;
 
 CREATE OR REPLACE PROCEDURE
-train_uv(source_table name, patience int DEFAULT 4, max_iterations int DEFAULT 8, training_validation_split float DEFAULT 0, quiet boolean DEFAULT false)
+train_uv(source_table name, patience int DEFAULT 4, max_iterations int DEFAULT 8, training_validation_split real DEFAULT 0, quiet boolean DEFAULT false)
 AS 'MODULE_PATHNAME' LANGUAGE C;
