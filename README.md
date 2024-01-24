@@ -1,6 +1,6 @@
 # sveddy
 
-Sveddy is an in-database ML system for PostgreSQL implementing collaborative filtering algorithms. Unlike any other open-source solution, Sveddy supports continuous learning. This means that when a user expresses their preferences, such as by rating an item, those preferences are immediately taken into account without requiring a full model re-train.
+Sveddy is an in-database ML system for PostgreSQL implementing collaborative filtering algorithms. Sveddy supports continuous learning, meaning that when a user expresses their preferences, such as by rating an item, those preferences are immediately taken into account without requiring a full model re-train. Sveddy's UV algorithm performs nearly as well (within ~2% RMSE) as the winning entries on the Netflix Prize dataset; see the performance section for more details.
 
 ## Example Usage
 
@@ -45,6 +45,16 @@ SELECT predict_uv(
     (SELECT weights FROM ratings_sveddy_model_v WHERE id = 4)
 );
 ```
+
+## Performance
+- Netflix dataset, UV model
+    - Hardware: Dell Inspiron 7506, unknown 880 MB/s SSD, Intel i7-1165G7, 16GB RAM
+    - Dataset: 100,480,507 ratings, 480,189 users, 17,700 movies
+    - Parameters: k = 4, regularization\_constant = 0.05
+    - Validation RMSE: 0.87 (within ~2% of [top performing entries](https://en.wikipedia.org/wiki/Netflix_Prize) which scored RMSEs around 0.85)
+    - Model initialization time (initialize\_model\_uv): 79s
+    - Training time: 370s (8 iterations)
+    - Continuous learning insertion overhead into ratings table: 450ms
 
 ## Building & Installation
 
