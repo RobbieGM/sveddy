@@ -5,7 +5,7 @@ let
 
   postgresqlSrc = pkgs.fetchurl {
     url = "https://ftp.postgresql.org/pub/source/v${postgres.version}/postgresql-${postgres.version}.tar.bz2";
-    sha256 = "sha256-zjxNhdGbASH+DT+O8fpgH3GYnob4pm99w61UbdVWT+w=";
+    sha256 = "sha256-RG6IKU28LJCFq0twYaZG+mBLS+wDUh1epnHC5a2bKVI=";
   };
 
   pwd = builtins.getEnv "PWD";
